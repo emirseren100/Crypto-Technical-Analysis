@@ -12,18 +12,14 @@
 
 ### Seçenek A — Git ile klonla
 
-GitHub’daki reponuzun sayfasında yeşil **Code** düğmesinden HTTPS adresini kopyalayın:
-
 ```bash
-git clone https://github.com/KULLANICI/REPO-ADI.git
-cd REPO-ADI
+git clone https://github.com/emirseren100/Crypto-Technical-Analysis.git
+cd Crypto-Technical-Analysis
 ```
-
-(`KULLANICI` ve `REPO-ADI` kendi hesabınıza göre değişir.)
 
 ### Seçenek B — ZIP
 
-GitHub sayfasında **Code → Download ZIP** ile indirin, klasörü çıkarın ve terminalde o klasöre gidin (`cd Binance`).
+GitHub sayfasında **Code → Download ZIP** ile indirin, klasörü çıkarın ve terminalde o klasöre gidin (`cd Crypto-Technical-Analysis`).
 
 ---
 
