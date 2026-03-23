@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Gizli / yerel yapilandirma (ASLA commit etmeyin)
+.env
+.env.*
+*.local
+secrets.json
+telegram_bot_config.json
+telegram_bot_state.json
+
+# Bot / uygulama kilit ve veri
+telegram_bot.lock
+paper_trades.db
+signals.db
+*.db-journal
+signal_history.db
+
+# Loglar
+logs/
+*.log
+
+# IDE / OS (Cursor kurallari repoda gorunmesin)
+.cursor/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Test / cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Qt / Windows
+*.user

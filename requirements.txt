@@ -1,0 +1,12 @@
+# Sabit surumler: pip freeze ile uretildi; kurulum: pip install -r requirements.txt
+# Python 3.10+ onerilir (pandas 3.x ile uyumlu).
+
+PyQt5==5.15.11
+matplotlib==3.10.8
+mplfinance==0.12.10b0
+numpy==2.4.2
+pandas==3.0.1
+plyer==2.1.0
+pytest==9.0.2
+requests==2.32.5
+websocket-client==1.9.0
