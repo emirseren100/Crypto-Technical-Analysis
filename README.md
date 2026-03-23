@@ -4,6 +4,8 @@
 
 **Uyarı:** Bu yazılım yatırım tavsiyesi değildir. Kripto işlemleri yüksek risk taşır.
 
+**Marka:** Bu proje **bağımsız** bir kişisel/portfolyo çalışmasıdır; **Binance** veya ilgili şirketlerle bağlantılı, onaylı veya sponsorlu değildir. “Binance” adı, yalnızca verinin hangi **halka açık API** üzerinden alındığını açıklamak için kullanılır. Resmi logo, ticari unvan taklidi veya “resmi uygulama” izlenimi verilmemelidir.
+
 > **Not:** Linux/macOS’ta çalıştırmayı deneyebilirsiniz; geliştirme ve test **Windows 10/11** üzerinde yapılmıştır.
 
 ---
