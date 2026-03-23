@@ -46,13 +46,21 @@ pip install -r requirements.txt
 
 ## Çalıştırma
 
-Proje klasöründe:
+**Önerilen (Windows):** `calistir.bat` dosyasına çift tıklayın — klasörü doğru ayarlar ve hata olursa pencere kapanmadan mesaj gösterir.
+
+Veya proje klasöründe terminalde:
 
 ```bash
 python app.py
 ```
 
+> **`app.py`’ye çift tıklayınca açılmıyorsa:** Windows genelde `.py` dosyasını düzenleyiciyle veya yanlış Python ile ilişkilendirir. `calistir.bat` kullanın veya `cmd` / PowerShell’de yukarıdaki komutu çalıştırın.
+
 Uygulama açıldığında grafik ve analiz sekmelerini kullanabilirsiniz. Veriler Binance **public** API ile çekilir; ekstra API anahtarı gerekmez.
+
+## Lisans
+
+Bu proje **MIT License** ile yayınlanır — detay için kökteki [`LICENSE`](LICENSE) dosyasına bakın.
 
 ---
 
