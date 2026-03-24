@@ -35,6 +35,7 @@ def run_full_analysis(
     prev_direction: Optional[str] = None,
     analyses_in_direction: int = 0,
     relax_adx: bool = True,
+    tp_profile: str = "normal",
 ) -> tuple[AnalysisResult, pd.DataFrame]:
     """
     Ana uygulama ile AYNI analiz - tum veriler cekilir.
@@ -129,5 +130,6 @@ def run_full_analysis(
         liquidations_24h=liq,
         exchange_flow_signal=flow,
         relax_adx=relax_adx,
+        tp_profile=tp_profile,
     )
     return res, df

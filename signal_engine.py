@@ -6,6 +6,7 @@ import pandas as pd
 
 from indicators import compute_all
 from confluence import compute_confluence
+from tp_profiles import get_tp_multipliers, normalize_tp_profile
 from price_action import (
     CandlePattern,
     Level,
@@ -93,6 +94,7 @@ def analyze(
     exchange_flow_signal: Optional[Literal["inflow", "outflow"]] = None,
     mtf_mandatory: Optional[bool] = None,
     use_extended_levels: Optional[bool] = None,
+    tp_profile: str = "normal",
 ) -> AnalysisResult:
     if len(df) < 50:
         return AnalysisResult(summary="Yetersiz veri (min 50 mum)")
@@ -113,6 +115,8 @@ def analyze(
         )
 
     scalp_mode = mode == "scalp"
+    tp_prof = normalize_tp_profile(tp_profile)
+    tp_m1, tp_m2, tp_m3 = get_tp_multipliers(tp_profile, scalp_mode)
     # Scalp: cok sert flip filtreleri - kararlar oynamasin
     _hyst = 8 if scalp_mode else direction_flip_hysteresis
     _score_gap_min = 4 if scalp_mode else 2
@@ -198,6 +202,7 @@ def analyze(
         "fib_levels": fib_levels,
         "volume_profile": vp,
         "structure_break": structure,
+        "tp_profile": tp_prof,
     }
 
     if atr_val <= 0:
@@ -694,6 +699,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -712,6 +720,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -735,6 +746,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         passed = conf_long.passed and conf_long.total >= min_conf_req
         if not passed:
@@ -772,6 +786,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         passed = conf_short.passed and conf_short.total >= min_conf_req
         if not passed:
@@ -810,6 +827,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -829,6 +849,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -850,6 +873,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -869,6 +895,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         return AnalysisResult(
             setup=setup,
@@ -889,6 +918,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         passed = conf_long.passed and conf_long.total >= min_conf_req
         if not passed:
@@ -913,6 +945,9 @@ def analyze(
             sl_widen=sl_widen,
             regime=regime.regime,
             adx_val=adx_val,
+            tp1_mult=tp_m1,
+            tp2_mult=tp_m2,
+            tp3_mult=tp_m3,
         )
         passed = conf_short.passed and conf_short.total >= min_conf_req
         if not passed:
@@ -1037,6 +1072,28 @@ def score_at_index(
                 long_score += 2
             else:
                 short_score += 2
+
+    # --- B: Trend filtresi + ADX minimum ---
+    adx_val = _safe(data["adx"].iloc[i], 25.0) if "adx" in data.columns else 25.0
+
+    if adx_val < 15:
+        long_score = max(0, long_score - 3)
+        short_score = max(0, short_score - 3)
+    elif adx_val < 20:
+        long_score = max(0, long_score - 1)
+        short_score = max(0, short_score - 1)
+
+    if trend == "down" and close < ema200:
+        long_score = max(0, long_score - 3)
+        short_score += 1
+    elif trend == "up" and close > ema200:
+        short_score = max(0, short_score - 3)
+        long_score += 1
+
+    if abs(long_score - short_score) <= 1 and long_score > 0:
+        long_score = max(0, long_score - 2)
+        short_score = max(0, short_score - 2)
+
     return long_score, short_score
 
 
@@ -1307,6 +1364,9 @@ def _build_long_setup(
     sl_widen: bool = False,
     regime: Optional[str] = None,
     adx_val: float = 25.0,
+    tp1_mult: float = 1.2,
+    tp2_mult: float = 2.2,
+    tp3_mult: float = 3.5,
 ) -> TradeSetup:
     recent_low = float(data["low"].iloc[max(0, last - 5) : last + 1].min())
     sl_atr_mult = 1.0 if scalp else 1.5
@@ -1332,9 +1392,6 @@ def _build_long_setup(
         risk = atr_val
         stop_loss = entry - risk
 
-    tp1_mult = 0.9 if scalp else 1.2
-    tp2_mult = 2.2
-    tp3_mult = 3.5
     tp1 = entry + risk * tp1_mult
     tp2 = entry + risk * tp2_mult
     tp3 = entry + risk * tp3_mult
@@ -1455,6 +1512,9 @@ def _build_short_setup(
     sl_widen: bool = False,
     regime: Optional[str] = None,
     adx_val: float = 25.0,
+    tp1_mult: float = 1.2,
+    tp2_mult: float = 2.2,
+    tp3_mult: float = 3.5,
 ) -> TradeSetup:
     recent_high = float(data["high"].iloc[max(0, last - 5) : last + 1].max())
     sl_atr_mult = 1.0 if scalp else 1.5
@@ -1480,9 +1540,6 @@ def _build_short_setup(
         risk = atr_val
         stop_loss = entry + risk
 
-    tp1_mult = 0.9 if scalp else 1.2
-    tp2_mult = 2.2
-    tp3_mult = 3.5
     tp1 = entry - risk * tp1_mult
     tp2 = entry - risk * tp2_mult
     tp3 = entry - risk * tp3_mult

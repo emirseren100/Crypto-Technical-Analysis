@@ -100,6 +100,7 @@ def get_recommendations(
     symbols_override: list[str] | None = None,
     account: float = DEFAULT_ACCOUNT,
     strict_filter: bool = True,
+    tp_profile: str = "normal",
 ) -> list[CoinRecommendation]:
     """
     Sembolleri tara, LONG/SHORT setup olanlari topla.
@@ -137,6 +138,7 @@ def get_recommendations(
                     mode="short",
                     use_symbol_calibration=True,
                     relax_adx=True,
+                    tp_profile=tp_profile,
                 )
             except Exception:
                 res = None
@@ -152,7 +154,7 @@ def get_recommendations(
 
             bt = BacktestResult(symbol=sym, interval=interval, total_candles=len(df))
             try:
-                bt = run_backtest(df, symbol=sym, interval=interval)
+                bt = run_backtest(df, symbol=sym, interval=interval, tp_profile=tp_profile)
             except Exception:
                 pass
 
@@ -235,15 +237,21 @@ def _normalize_symbol(s: str) -> str:
 
 
 def _top_symbols(limit: int = 30) -> list[str]:
-    """Oncelikli semboller - hizli liste (cok API cagrisi yapmaz)."""
-    return [
+    """Oncelikli semboller - yalnizca borsada TRADING olanlar (delist filtre)."""
+    priority = [
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
         "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT",
-        "MATICUSDT", "LTCUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
+        "LTCUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
         "PEPEUSDT", "SHIBUSDT", "APTUSDT", "ARBUSDT", "OPUSDT",
         "SUIUSDT", "NEARUSDT", "INJUSDT", "FILUSDT", "RENDERUSDT",
         "WLDUSDT", "FETUSDT", "TAOUSDT", "BONKUSDT", "FLOKIUSDT",
-    ][:limit]
+    ]
+    try:
+        valid = set(fetch_usdt_symbols())
+        ordered = [s for s in priority if s in valid]
+        return ordered[:limit]
+    except Exception:
+        return priority[:limit]
 
 
 def _futures_symbols_with_majors_first(max_count: Optional[int] = None) -> list[str]:
@@ -265,6 +273,7 @@ def get_recommendation_for_symbol(
     interval: str = "30m",
     limit: int = 250,
     account: float | None = None,
+    tp_profile: str = "normal",
 ) -> CoinRecommendation | None:
     """
     Tek bir coin icin analiz. Entry, SL, TP gercek signal_engine + backtest sonucu.
@@ -277,6 +286,7 @@ def get_recommendation_for_symbol(
         symbols_override=[_normalize_symbol(symbol)],
         account=account if account is not None else DEFAULT_ACCOUNT,
         strict_filter=False,
+        tp_profile=tp_profile,
     )
     return recs[0] if recs else None
 

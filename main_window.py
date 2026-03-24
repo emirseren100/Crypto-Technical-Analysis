@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -19,11 +20,14 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QStatusBar,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +56,7 @@ from correlation_matrix import compute_correlation_matrix
 from economic_calendar import get_economic_calendar_warning
 from multi_timeframe import MTFResult, run_mtf_analysis
 from signal_engine import AnalysisResult, TradeSetup, analyze
+from tp_profiles import get_tp_multipliers
 from report_generator import export_to_csv, export_to_excel, generate_report_text, get_history_filtered, get_monthly_stats, get_weekly_stats
 from signal_history import get_calibration_stats, get_history, get_session_win_rates, get_stats, save_signal, update_result
 from coin_recommendations import CoinRecommendation, get_recommendations
@@ -182,6 +187,72 @@ class MainWindow(QMainWindow):
         self._on_interval_changed(self._combo_interval.currentText())
         self._on_refresh()
 
+    def _wrap_label(self, text: str = "", *, color: str | None = None, font_px: int = 11) -> QLabel:
+        """Cok satirli metinlerde ust uste binmeyi onlemek icin word wrap + size policy."""
+        lb = QLabel(text)
+        lb.setWordWrap(True)
+        lb.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        lb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        c = color if color is not None else TEXT
+        lb.setStyleSheet(f"color: {c}; font-size: {font_px}px;")
+        return lb
+
+    def _apply_table_compact(self, table: QTableWidget) -> None:
+        """Tablo tum dikey alani calmasin; satir yuksekligi icerige gore kalsin."""
+        table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.verticalHeader().setVisible(False)
+
+    def _make_column_scroll(self, min_w: int) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
+        """Sol/sag sabit kolonlar: icerik scroll; metin kesilmez."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setMinimumWidth(min_w)
+        scroll.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        inner = QWidget()
+        inner.setMinimumWidth(max(220, min_w - 20))
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        scroll.setWidget(inner)
+        return scroll, inner, lay
+
+    def _get_tp_profile(self) -> str:
+        """Secili TP profili (normal / aggressive / conservative)."""
+        data = self._combo_tp_profile.currentData()
+        if data is not None:
+            return str(data)
+        return "normal"
+
+    @staticmethod
+    def _tp_profile_display_label(profile_id: str) -> str:
+        return {
+            "normal": "Normal",
+            "aggressive": "Yuksek hedef (riskli)",
+            "conservative": "Muhafazakar (yakin TP)",
+        }.get(profile_id or "normal", profile_id or "Normal")
+
+    def _on_tp_profile_changed(self, *_args) -> None:
+        try:
+            QSettings("BinanceTA", "TeknikAnaliz").setValue("tp_profile", self._get_tp_profile())
+        except Exception:
+            pass
+        self._update_backtest_tp_mults_label()
+
+    def _update_backtest_tp_mults_label(self) -> None:
+        if not hasattr(self, "_lbl_bt_tp_mults"):
+            return
+        scalp = self._combo_mode.currentIndex() == 2
+        m1, m2, m3 = get_tp_multipliers(self._get_tp_profile(), scalp)
+        prof = self._tp_profile_display_label(self._get_tp_profile())
+        self._lbl_bt_tp_mults.setText(
+            f"TP mesafeleri: TP profilinden ({m1:.2f} / {m2:.2f} / {m3:.2f} R)  |  Profil: {prof}  |  "
+            f"Kismi cikis: uc TP'ye 1/3 + 1/3 + 1/3"
+        )
+
     def closeEvent(self, event) -> None:
         """Pencere kapanirken timer ve WS durdur - crash onle."""
         try:
@@ -210,6 +281,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root = QHBoxLayout(central)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(10)
 
         root.addLayout(self._build_left_panel(), 0)
 
@@ -239,19 +312,28 @@ class MainWindow(QMainWindow):
         self._ws_status_label = QLabel("WS: Kapalı")
         self._ws_status_label.setStyleSheet(f"color: {ORANGE};")
         self._status.addWidget(self._ws_status_label)
+        self._status.setStyleSheet(
+            "QStatusBar { padding: 6px 10px; min-height: 24px; font-size: 11px; }"
+        )
 
     # --- Left panel ---
 
     def _build_left_panel(self) -> QVBoxLayout:
-        layout = QVBoxLayout()
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll, _inner, inner_lay = self._make_column_scroll(288)
 
         grp = QGroupBox("Ayarlar")
-        grp.setMinimumWidth(220)
-        grp.setMaximumWidth(280)
+        grp.setMinimumWidth(260)
+        grp.setMaximumWidth(340)
         grp_layout = QVBoxLayout(grp)
+        grp_layout.setSpacing(8)
+        grp_layout.setContentsMargins(12, 16, 12, 14)
         _settings = QSettings("BinanceTA", "TeknikAnaliz")
 
-        grp_layout.addWidget(QLabel("Parite Ara"))
+        la = QLabel("Parite Ara")
+        la.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(la)
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Örn: BTC, SOL, DOGE...")
         self._search_input.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
@@ -264,39 +346,69 @@ class MainWindow(QMainWindow):
         self._search_input.setCompleter(self._search_completer)
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._search_input.returnPressed.connect(self._on_search_enter)
+        self._search_input.setMinimumHeight(32)
         grp_layout.addWidget(self._search_input)
 
         self._combo_symbol = QComboBox()
         self._combo_symbol.setMaxVisibleItems(20)
-        self._combo_symbol.setMinimumWidth(160)
+        self._combo_symbol.setMinimumWidth(180)
         self._combo_symbol.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._combo_symbol.currentTextChanged.connect(self._on_symbol_changed)
         grp_layout.addWidget(self._combo_symbol)
 
-        grp_layout.addSpacing(6)
-        grp_layout.addWidget(QLabel("Analiz Modu"))
+        grp_layout.addSpacing(4)
+        lm = QLabel("Analiz Modu")
+        lm.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lm)
         self._combo_mode = QComboBox()
         self._combo_mode.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._combo_mode.addItems(["Kisa Vade (15m/1h)", "Uzun Vade (4h/1d)", "Scalp (5m/15m)"])
         self._combo_mode.setToolTip("Kisa vade: dusuk esik. Uzun vade: yuksek esik, swing. Scalp: 5m/15m, dar SL/TP, hacim onayi.")
         grp_layout.addWidget(self._combo_mode)
 
-        grp_layout.addWidget(QLabel("Zaman Dilimi"))
+        ltp = QLabel("TP Profili")
+        ltp.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(ltp)
+        self._combo_tp_profile = QComboBox()
+        self._combo_tp_profile.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
+        self._combo_tp_profile.addItem("Normal (varsayilan)", "normal")
+        self._combo_tp_profile.addItem("Yuksek hedef (daha riskli)", "aggressive")
+        self._combo_tp_profile.addItem("Muhafazakar (yakin TP)", "conservative")
+        self._combo_tp_profile.setToolTip(
+            "Ayni analiz ve stop; sadece TP1/TP2/TP3 mesafesi degisir. "
+            "Paper ve oneriler icin secimi yaptiktan sonra analiz/oneri yenileyin."
+        )
+        grp_layout.addWidget(self._combo_tp_profile)
+        self._combo_tp_profile.blockSignals(True)
+        saved_tp = str(_settings.value("tp_profile", "normal"))
+        for i in range(self._combo_tp_profile.count()):
+            if self._combo_tp_profile.itemData(i) == saved_tp:
+                self._combo_tp_profile.setCurrentIndex(i)
+                break
+        else:
+            self._combo_tp_profile.setCurrentIndex(0)
+        self._combo_tp_profile.blockSignals(False)
+        self._combo_tp_profile.currentIndexChanged.connect(self._on_tp_profile_changed)
+
+        lz = QLabel("Zaman Dilimi")
+        lz.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lz)
         self._combo_interval = QComboBox()
         self._combo_interval.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._combo_interval.addItems(INTERVALS)
         self._combo_interval.setCurrentText("1h")
         grp_layout.addWidget(self._combo_interval)
-        self._interval_warning_label = QLabel("")
-        self._interval_warning_label.setStyleSheet(f"color: {ORANGE}; font-size: 9px;")
-        self._interval_warning_label.setWordWrap(True)
+        self._interval_warning_label = self._wrap_label("", color=ORANGE, font_px=11)
         grp_layout.addWidget(self._interval_warning_label)
-        self._interval_tip_label = QLabel("Öneri: 15m / 1h / 4h - daha az gürültü")
-        self._interval_tip_label.setStyleSheet(f"color: {GREEN}; font-size: 9px;")
+        self._interval_tip_label = self._wrap_label(
+            "Öneri: 15m / 1h / 4h — daha az gürültü", color=GREEN, font_px=11
+        )
         grp_layout.addWidget(self._interval_tip_label)
         self._combo_interval.currentTextChanged.connect(self._on_interval_changed)
 
-        grp_layout.addWidget(QLabel("Mum Sayisi"))
+        lmum = QLabel("Mum Sayisi")
+        lmum.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lmum)
         self._combo_limit = QComboBox()
         self._combo_limit.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._combo_limit.addItems(["100", "200", "300", "500", "750", "1000"])
@@ -321,42 +433,55 @@ class MainWindow(QMainWindow):
         grp_layout.addWidget(self._live_price_label)
 
         grp_layout.addSpacing(8)
-        grp_layout.addWidget(QLabel("Hesap Buyuklugu ($)"))
+        lh = QLabel("Hesap Buyuklugu ($)")
+        lh.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lh)
         self._spin_account_size = QSpinBox()
         self._spin_account_size.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._spin_account_size.setRange(10, 1_000_000)
         self._spin_account_size.setValue(_settings.value("account_size", 100, type=int))
         self._spin_account_size.setSuffix(" $")
+        self._spin_account_size.setMinimumHeight(32)
         self._spin_account_size.valueChanged.connect(self._on_account_size_changed)
         grp_layout.addWidget(self._spin_account_size)
-        self._balance_label = QLabel(f"Risk: güven 6-7→%1, 8-9→%1.5, 10→%2 | Max kaldıraç: {MAX_LEVERAGE}x")
-        self._balance_label.setStyleSheet(f"color: {GREEN}; font-size: 10px;")
-        self._balance_label.setWordWrap(True)
+        self._balance_label = self._wrap_label(
+            "Risk yüzdesi (güvene göre): 6–7 → %1, 8–9 → %1.5, 10 → %2.\n"
+            f"Max kaldıraç: {MAX_LEVERAGE}x (bilgilendirme, yatırım tavsiyesi değildir).",
+            color=GREEN,
+            font_px=11,
+        )
         grp_layout.addWidget(self._balance_label)
 
-        self._market_context_label = QLabel("Fear & Greed: -- | BTC Dom: --")
-        self._market_context_label.setStyleSheet(f"color: {BLUE}; font-size: 9px;")
-        self._market_context_label.setWordWrap(True)
+        self._market_context_label = self._wrap_label(
+            "Fear & Greed: -- | BTC Dom: --", color=BLUE, font_px=11
+        )
         grp_layout.addWidget(self._market_context_label)
-        self._market_context_comment = QLabel("")
-        self._market_context_comment.setStyleSheet("color: #9e9e9e; font-size: 8px; font-style: italic;")
-        self._market_context_comment.setWordWrap(True)
+        self._market_context_comment = self._wrap_label("", color="#9e9e9e", font_px=10)
+        self._market_context_comment.setStyleSheet(
+            "color: #9e9e9e; font-size: 10px; font-style: italic;"
+        )
         grp_layout.addWidget(self._market_context_comment)
 
         grp_layout.addSpacing(6)
-        grp_layout.addWidget(QLabel("Min. Guven (kalibre uygulanir)"))
+        lmg = QLabel("Min. Guven (kalibre uygulanir)")
+        lmg.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lmg)
         self._spin_min_conf = QSpinBox()
         self._spin_min_conf.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._spin_min_conf.setRange(4, 10)
         self._spin_min_conf.setValue(_settings.value("min_confidence", 6, type=int))
+        self._spin_min_conf.setMinimumHeight(32)
         self._spin_min_conf.valueChanged.connect(self._on_min_conf_changed)
         grp_layout.addWidget(self._spin_min_conf)
-        self._calib_label = QLabel("")
-        self._calib_label.setStyleSheet("color: #9e9e9e; font-size: 8px;")
+        self._calib_label = self._wrap_label("", color="#9e9e9e", font_px=10)
         grp_layout.addWidget(self._calib_label)
 
         grp_layout.addSpacing(6)
-        grp_layout.addWidget(QLabel("Pozisyonum (ters sinyal uyarisi icin)"))
+        lpos = QLabel("Pozisyonum (ters sinyal uyarisi icin)")
+        lpos.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        lpos.setWordWrap(True)
+        lpos.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        grp_layout.addWidget(lpos)
         self._combo_my_position = QComboBox()
         self._combo_my_position.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
         self._combo_my_position.addItems(["Yok", "LONG", "SHORT"])
@@ -364,12 +489,16 @@ class MainWindow(QMainWindow):
 
         grp_layout.addSpacing(8)
         self._chk_notifications = QCheckBox("Bildirimleri ac (ses + popup)")
+        self._chk_notifications.setStyleSheet(f"color: {TEXT}; font-size: 11px; padding: 6px 0px;")
+        self._chk_notifications.setToolTip("Ses ve masaustu bildirimi (Windows bildirim merkezi)")
         self._chk_notifications.setChecked(_settings.value("notifications_enabled", True, type=bool))
         self._chk_notifications.stateChanged.connect(self._on_notifications_toggled)
         grp_layout.addWidget(self._chk_notifications)
 
         grp_layout.addSpacing(6)
-        grp_layout.addWidget(QLabel("Tema"))
+        lt = QLabel("Tema")
+        lt.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lt)
         self._combo_theme = QComboBox()
         self._combo_theme.addItems(["Koyu", "Acik"])
         self._combo_theme.setCurrentIndex(0 if _settings.value("theme_dark", True, type=bool) else 1)
@@ -384,9 +513,9 @@ class MainWindow(QMainWindow):
         grp_layout.addWidget(self._btn_favorite)
 
         grp_layout.addStretch()
-        layout.addWidget(grp)
-        layout.addStretch()
-        return layout
+        inner_lay.addWidget(grp)
+        outer.addWidget(scroll)
+        return outer
 
     # --- Chart tab ---
 
@@ -483,7 +612,7 @@ class MainWindow(QMainWindow):
                 res = analyze(df, mtf_consensus=mtf.consensus, min_confidence=4, relax_adx=True,
                              mode=mode, interval=interval, symbol=symbol, prev_direction=prev_dir,
                              fear_greed_index=fear_greed_index, liquidations_24h=liq,
-                             exchange_flow_signal=flow)
+                             exchange_flow_signal=flow, tp_profile=self._get_tp_profile())
                 if res and res.indicators and res.indicators.get("trend") is None:
                     res.indicators["trend"] = "sideways"
                 setup_dir = res.setup.direction if res.setup else None
@@ -661,7 +790,11 @@ class MainWindow(QMainWindow):
         self._scalp_indicator_table = QTableWidget(0, 2)
         self._scalp_indicator_table.setHorizontalHeaderLabels(["Indikator", "Deger"])
         self._scalp_indicator_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self._scalp_indicator_table.verticalHeader().setDefaultSectionSize(24)
+        self._scalp_indicator_table.verticalHeader().setDefaultSectionSize(26)
+        self._scalp_indicator_table.setStyleSheet(
+            f"QTableWidget {{ color: {TEXT}; }} QTableWidget::item {{ color: #eaecef; padding: 6px; }}"
+        )
+        self._apply_table_compact(self._scalp_indicator_table)
         layout.addWidget(self._scalp_indicator_table)
 
         return w
@@ -742,6 +875,7 @@ class MainWindow(QMainWindow):
                     analyses_in_current_direction=analyses_in_dir,
                     fear_greed_index=fear_greed_index, liquidations_24h=liq,
                     exchange_flow_signal=flow,
+                    tp_profile=self._get_tp_profile(),
                 )
                 return ("ok", res, df, symbol, interval)
             except Exception as e:
@@ -809,6 +943,7 @@ class MainWindow(QMainWindow):
                 for i, (name, val) in enumerate(rows):
                     self._scalp_indicator_table.setItem(i, 0, QTableWidgetItem(name))
                     self._scalp_indicator_table.setItem(i, 1, QTableWidgetItem(str(val)))
+                self._scalp_indicator_table.resizeRowsToContents()
 
                 self._scalp_chart.plot(df, symbol=sym, interval=intv, setup=setup, scalp=True, figsize=(10, 4))
             except Exception as e:
@@ -913,53 +1048,63 @@ class MainWindow(QMainWindow):
         info.setStyleSheet("color: #9e9e9e; font-size: 10px;")
         layout.addWidget(info)
 
-        form = QHBoxLayout()
-        form.addWidget(QLabel("Parite"))
         self._tr_symbol = QComboBox()
         self._tr_symbol.setEditable(True)
+        self._tr_symbol.setMinimumWidth(140)
         self._tr_symbol.addItems(["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"])
-        form.addWidget(self._tr_symbol)
-
-        form.addWidget(QLabel("Dilim"))
         self._tr_interval = QComboBox()
         self._tr_interval.addItems(INTERVALS)
         self._tr_interval.setCurrentText("1h")
-        form.addWidget(self._tr_interval)
-
-        form.addWidget(QLabel("Yön"))
+        self._tr_interval.setMinimumWidth(90)
         self._tr_direction = QComboBox()
         self._tr_direction.addItems(["LONG", "SHORT"])
-        form.addWidget(self._tr_direction)
-
-        form.addWidget(QLabel("Giriş"))
+        self._tr_direction.setMinimumWidth(100)
         self._tr_entry = QDoubleSpinBox()
         self._tr_entry.setRange(0.0001, 10_000_000)
         self._tr_entry.setDecimals(6)
-        form.addWidget(self._tr_entry)
-        btn_fill = QPushButton("Fiyat")
-        btn_fill.setToolTip("Grafikteki güncel fiyatı girişe yaz")
-        btn_fill.clicked.connect(lambda: self._tr_entry.setValue(self._live_price) if self._live_price > 0 else None)
-        form.addWidget(btn_fill)
-
-        form.addWidget(QLabel("Çıkış"))
+        self._tr_entry.setMinimumWidth(140)
         self._tr_exit = QDoubleSpinBox()
         self._tr_exit.setRange(0.0001, 10_000_000)
         self._tr_exit.setDecimals(6)
-        form.addWidget(self._tr_exit)
-
-        form.addWidget(QLabel("Güven (1-10)"))
+        self._tr_exit.setMinimumWidth(140)
         self._tr_confidence = QSpinBox()
         self._tr_confidence.setRange(1, 10)
         self._tr_confidence.setValue(7)
-        form.addWidget(self._tr_confidence)
-
+        self._tr_confidence.setMinimumWidth(70)
+        btn_fill = QPushButton("Canli fiyat")
+        btn_fill.setMinimumHeight(32)
+        btn_fill.setToolTip("Grafikteki güncel fiyatı girişe yaz")
+        btn_fill.clicked.connect(lambda: self._tr_entry.setValue(self._live_price) if self._live_price > 0 else None)
         self._btn_add_trade = QPushButton("Ekle")
+        self._btn_add_trade.setMinimumHeight(36)
         self._btn_add_trade.clicked.connect(self._on_add_trade_result)
-        form.addWidget(self._btn_add_trade)
         self._btn_delete_trade = QPushButton("Secileni Sil")
+        self._btn_delete_trade.setMinimumHeight(36)
         self._btn_delete_trade.clicked.connect(self._on_delete_trade_result)
-        form.addWidget(self._btn_delete_trade)
-        form.addStretch()
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.setColumnMinimumWidth(1, 120)
+        r = 0
+        form.addWidget(QLabel("Parite"), r, 0)
+        form.addWidget(self._tr_symbol, r, 1, 1, 2)
+        form.addWidget(QLabel("Dilim"), r, 3)
+        form.addWidget(self._tr_interval, r, 4)
+        form.addWidget(QLabel("Yön"), r, 5)
+        form.addWidget(self._tr_direction, r, 6)
+        r += 1
+        form.addWidget(QLabel("Giriş"), r, 0)
+        form.addWidget(self._tr_entry, r, 1, 1, 2)
+        form.addWidget(btn_fill, r, 3)
+        form.addWidget(QLabel("Çıkış"), r, 4)
+        form.addWidget(self._tr_exit, r, 5, 1, 2)
+        r += 1
+        form.addWidget(QLabel("Güven (1-10)"), r, 0)
+        form.addWidget(self._tr_confidence, r, 1)
+        form.addWidget(self._btn_add_trade, r, 2)
+        form.addWidget(self._btn_delete_trade, r, 3)
+        form.setColumnStretch(7, 1)
         layout.addLayout(form)
 
         self._trade_results_table = QTableWidget(0, 8)
@@ -989,14 +1134,18 @@ class MainWindow(QMainWindow):
         info.setStyleSheet("color: #9e9e9e; font-size: 10px;")
         layout.addWidget(info)
 
-        top = QHBoxLayout()
+        top = QVBoxLayout()
         self._btn_paper_refresh = QPushButton("Fiyatlari Guncelle ve Kapanislari Kontrol Et")
-        self._btn_paper_refresh.setStyleSheet(f"background-color: {BLUE}; color: white; padding: 6px;")
+        self._btn_paper_refresh.setMinimumHeight(40)
+        self._btn_paper_refresh.setStyleSheet(
+            f"background-color: {BLUE}; color: white; padding: 10px 14px; font-size: 11px;"
+        )
         self._btn_paper_refresh.clicked.connect(self._on_paper_refresh)
         top.addWidget(self._btn_paper_refresh)
-        top.addStretch()
         self._paper_summary_label = QLabel("Ozet: --")
-        self._paper_summary_label.setStyleSheet(f"color: {TEXT}; font-weight: bold;")
+        self._paper_summary_label.setWordWrap(True)
+        self._paper_summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._paper_summary_label.setStyleSheet(f"color: {TEXT}; font-weight: bold; font-size: 11px; padding: 12px 0px;")
         top.addWidget(self._paper_summary_label)
         layout.addLayout(top)
 
@@ -1007,6 +1156,8 @@ class MainWindow(QMainWindow):
         ])
         self._paper_open_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._paper_open_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._paper_open_table.setStyleSheet(f"QTableWidget::item {{ color: #eaecef; padding: 6px; }}")
+        self._apply_table_compact(self._paper_open_table)
         layout.addWidget(self._paper_open_table)
 
         layout.addWidget(QLabel("Kapanan islemler (son 50):"))
@@ -1016,6 +1167,8 @@ class MainWindow(QMainWindow):
         ])
         self._paper_closed_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._paper_closed_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._paper_closed_table.setStyleSheet(f"QTableWidget::item {{ color: #eaecef; padding: 6px; }}")
+        self._apply_table_compact(self._paper_closed_table)
         layout.addWidget(self._paper_closed_table)
         return w
 
@@ -1110,55 +1263,61 @@ class MainWindow(QMainWindow):
         info.setStyleSheet("color: #9e9e9e; font-size: 10px;")
         layout.addWidget(info)
 
-        form = QHBoxLayout()
-        form.addWidget(QLabel("Entry"))
         self._pc_entry = QDoubleSpinBox()
         self._pc_entry.setRange(0.0001, 10_000_000)
         self._pc_entry.setDecimals(4)
         self._pc_entry.setValue(50000)
-        form.addWidget(self._pc_entry)
-
-        form.addWidget(QLabel("Stop-Loss"))
+        self._pc_entry.setMinimumWidth(120)
         self._pc_sl = QDoubleSpinBox()
         self._pc_sl.setRange(0.0001, 10_000_000)
         self._pc_sl.setDecimals(4)
         self._pc_sl.setValue(49000)
-        form.addWidget(self._pc_sl)
-
-        form.addWidget(QLabel("Take Profit"))
+        self._pc_sl.setMinimumWidth(120)
         self._pc_tp = QDoubleSpinBox()
         self._pc_tp.setRange(0.0001, 10_000_000)
         self._pc_tp.setDecimals(4)
         self._pc_tp.setValue(51500)
-        form.addWidget(self._pc_tp)
-
-        form.addWidget(QLabel("Yon"))
+        self._pc_tp.setMinimumWidth(120)
         self._pc_direction = QComboBox()
         self._pc_direction.addItems(["LONG", "SHORT"])
-        form.addWidget(self._pc_direction)
-
-        form.addWidget(QLabel("Hesap ($)"))
+        self._pc_direction.setMinimumWidth(100)
         self._pc_account = QSpinBox()
         self._pc_account.setRange(10, 1_000_000)
         self._pc_account.setValue(100)
-        form.addWidget(self._pc_account)
-
-        form.addWidget(QLabel("Risk %"))
+        self._pc_account.setMinimumWidth(110)
         self._pc_risk_pct = QDoubleSpinBox()
         self._pc_risk_pct.setRange(0.1, 10.0)
         self._pc_risk_pct.setValue(1.0)
         self._pc_risk_pct.setSingleStep(0.5)
-        form.addWidget(self._pc_risk_pct)
-
+        self._pc_risk_pct.setMinimumWidth(80)
         self._btn_pc_calc = QPushButton("Hesapla")
+        self._btn_pc_calc.setMinimumHeight(36)
         self._btn_pc_calc.clicked.connect(self._on_position_calc)
-        form.addWidget(self._btn_pc_calc)
-
         btn_sync = QPushButton("Ayarlardan")
+        btn_sync.setMinimumHeight(36)
         btn_sync.setToolTip("Hesap buyuklugunu sol panelden al")
         btn_sync.clicked.connect(lambda: self._pc_account.setValue(int(self._get_account_size())))
-        form.addWidget(btn_sync)
-        form.addStretch()
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        r = 0
+        form.addWidget(QLabel("Entry"), r, 0)
+        form.addWidget(self._pc_entry, r, 1)
+        form.addWidget(QLabel("Stop-Loss"), r, 2)
+        form.addWidget(self._pc_sl, r, 3)
+        form.addWidget(QLabel("Take Profit"), r, 4)
+        form.addWidget(self._pc_tp, r, 5)
+        r += 1
+        form.addWidget(QLabel("Yön"), r, 0)
+        form.addWidget(self._pc_direction, r, 1)
+        form.addWidget(QLabel("Hesap ($)"), r, 2)
+        form.addWidget(self._pc_account, r, 3)
+        form.addWidget(QLabel("Risk %"), r, 4)
+        form.addWidget(self._pc_risk_pct, r, 5)
+        form.addWidget(self._btn_pc_calc, r, 6)
+        form.addWidget(btn_sync, r, 7)
+        form.setColumnStretch(8, 1)
         layout.addLayout(form)
 
         self._pc_result = QLabel("Sonuc burada gorunecek.")
@@ -1218,53 +1377,60 @@ class MainWindow(QMainWindow):
 
         info = QLabel(
             "Backtest: Gecmis mum verisi uzerinde stratejinizi simule eder. "
-            "SL/TP ATR ile, sinyal gucu ile giris yapar. Sonuc: kac islem, kazanc/kayip, "
-            "basari orani, toplam PnL. Gercek para degil; stratejiyi test etmek icin."
+            "SL mesafesi ATR carpani ile; TP1/TP2/TP3 sol paneldeki TP Profili ile (risk R cinsinden). "
+            "Min sinyal gucu ile giris. Sonuc: islem sayisi, PnL, basari orani. Gercek para degildir."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color: #9e9e9e; font-size: 10px; padding: 4px;")
         layout.addWidget(info)
 
-        params = QHBoxLayout()
+        self._lbl_bt_tp_mults = QLabel("")
+        self._lbl_bt_tp_mults.setWordWrap(True)
+        self._lbl_bt_tp_mults.setStyleSheet("color: #8bc34a; font-size: 11px; padding: 6px 2px;")
+        layout.addWidget(self._lbl_bt_tp_mults)
 
-        params.addWidget(QLabel("SL (ATR x)"))
         self._spin_sl = QDoubleSpinBox()
         self._spin_sl.setRange(0.5, 5.0)
         self._spin_sl.setValue(1.5)
         self._spin_sl.setSingleStep(0.1)
-        params.addWidget(self._spin_sl)
-
-        params.addWidget(QLabel("TP (ATR x)"))
-        self._spin_tp = QDoubleSpinBox()
-        self._spin_tp.setRange(0.5, 10.0)
-        self._spin_tp.setValue(2.5)
-        self._spin_tp.setSingleStep(0.1)
-        params.addWidget(self._spin_tp)
-
-        params.addWidget(QLabel("Min Sinyal Gucu"))
+        self._spin_sl.setMinimumWidth(72)
         self._spin_min_str = QSpinBox()
         self._spin_min_str.setRange(2, 10)
         self._spin_min_str.setValue(4)
-        params.addWidget(self._spin_min_str)
-
-        params.addWidget(QLabel("Komisyon %"))
+        self._spin_min_str.setMinimumWidth(56)
         self._spin_comm = QDoubleSpinBox()
         self._spin_comm.setRange(0.0, 1.0)
         self._spin_comm.setValue(0.1)
         self._spin_comm.setSingleStep(0.01)
-        params.addWidget(self._spin_comm)
-
+        self._spin_comm.setMinimumWidth(72)
         self._btn_backtest = QPushButton("Backtest Baslat")
+        self._btn_backtest.setMinimumHeight(36)
         self._btn_backtest.clicked.connect(self._on_run_backtest)
-        params.addWidget(self._btn_backtest)
         self._btn_optimize = QPushButton("Optimize")
+        self._btn_optimize.setMinimumHeight(36)
         self._btn_optimize.clicked.connect(self._on_optimize_backtest)
-        params.addWidget(self._btn_optimize)
         self._btn_symbol_perf = QPushButton("Sembol Performansi")
+        self._btn_symbol_perf.setMinimumHeight(36)
         self._btn_symbol_perf.clicked.connect(self._on_symbol_performance)
-        params.addWidget(self._btn_symbol_perf)
-        params.addStretch()
+
+        params = QGridLayout()
+        params.setHorizontalSpacing(12)
+        params.setVerticalSpacing(8)
+        r = 0
+        params.addWidget(QLabel("SL (ATR x)"), r, 0)
+        params.addWidget(self._spin_sl, r, 1)
+        params.addWidget(QLabel("Min Sinyal"), r, 2)
+        params.addWidget(self._spin_min_str, r, 3)
+        params.addWidget(QLabel("Komisyon %"), r, 4)
+        params.addWidget(self._spin_comm, r, 5)
+        r += 1
+        params.addWidget(self._btn_backtest, r, 0, 1, 2)
+        params.addWidget(self._btn_optimize, r, 2, 1, 2)
+        params.addWidget(self._btn_symbol_perf, r, 4, 1, 3)
+        params.setColumnStretch(6, 1)
         layout.addLayout(params)
+        self._combo_mode.currentIndexChanged.connect(self._update_backtest_tp_mults_label)
+        self._update_backtest_tp_mults_label()
 
         self._bt_summary = QLabel("Backtest sonuclari burada gosterilecek.")
         self._bt_summary.setFont(QFont("Segoe UI", 10))
@@ -1441,12 +1607,18 @@ class MainWindow(QMainWindow):
 
         self._rec_table = QTableWidget(0, 11)
         self._rec_table.setHorizontalHeaderLabels([
-            "Parite", "Yon", "Entry", "SL", "TP1", "TP2", "TP3", "Kaldirac", "Pozisyon $", "Risk %", "Guc",
+            "Parite", "Yön", "Entry", "SL", "TP1", "TP2", "TP3", "Lev x", "Pos $", "Risk %", "Güç",
         ])
-        self._rec_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        _rh = self._rec_table.horizontalHeader()
+        _rh.setSectionResizeMode(QHeaderView.Interactive)
+        _rh.setMinimumSectionSize(56)
+        _rh.setDefaultSectionSize(88)
+        _rh.setStretchLastSection(False)
         self._rec_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._rec_table.verticalHeader().setDefaultSectionSize(36)
         self._rec_table.setWordWrap(True)
+        self._rec_table.setAlternatingRowColors(True)
+        self._apply_table_compact(self._rec_table)
         layout.addWidget(self._rec_table)
 
         self._rec_detail = QLabel("Detay: Bir satir secin.")
@@ -1461,27 +1633,37 @@ class MainWindow(QMainWindow):
         self._btn_fetch_recs.setEnabled(False)
         self._rec_detail.setText("API'den veri cekiliyor... Arka planda calisiyor, bekleyin.")
         interval = self._rec_interval.currentText()
+        account = float(self._get_account_size())
 
-        def run():
+        tp_prof = self._get_tp_profile()
+
+        def run_recs():
             try:
                 return get_recommendations(
                     interval=interval,
                     limit=200,
-                    max_symbols=6,
-                    account=self._get_account_size(),
+                    max_symbols=12,
+                    parallel_workers=4,
+                    account=account,
+                    strict_filter=False,
+                    tp_profile=tp_prof,
                 )
             except Exception as e:
                 return ("error", str(e))
 
         class RecWorker(QThread):
-            finished = pyqtSignal(object)
+            # QThread'in 'finished' sinyali ile ad cakismasi slot'u kirar — baska isim kullan.
+            recommendations_ready = pyqtSignal(object)
 
             def run(self):
-                recs = run()
-                self.finished.emit(recs)
+                try:
+                    out = run_recs()
+                    self.recommendations_ready.emit(out)
+                except Exception as e:
+                    self.recommendations_ready.emit(("error", str(e)))
 
         self._rec_worker = RecWorker()
-        self._rec_worker.finished.connect(self._on_rec_worker_finished)
+        self._rec_worker.recommendations_ready.connect(self._on_rec_worker_finished)
         self._rec_worker.start()
 
     def _on_rec_worker_finished(self, result) -> None:
@@ -1509,10 +1691,20 @@ class MainWindow(QMainWindow):
                 self._rec_table.setItem(i, 8, QTableWidgetItem(f"${r.pos_usd:.0f}"))
                 self._rec_table.setItem(i, 9, QTableWidgetItem(f"%{r.risk_pct:.1f}"))
                 self._rec_table.setItem(i, 10, QTableWidgetItem(f"{r.confidence}/10"))
+            self._rec_table.resizeColumnsToContents()
+            hdr = self._rec_table.horizontalHeader()
+            for col in range(11):
+                if hdr.sectionSize(col) < 56:
+                    hdr.resizeSection(col, 56)
             if recs:
-                self._rec_detail.setText(f"{len(recs)} coin - Entry/SL/TP/Kaldirac tavsiyesi. Cift tikla: grafik ve trade setup.")
+                self._rec_detail.setText(
+                    f"{len(recs)} parite — Entry/SL/TP ve kaldirac oneri. Cift tikla: Grafik + Trade Setup."
+                )
             else:
-                self._rec_detail.setText("LONG/SHORT setup bulunamadi. Tekrar deneyin veya farkli dilim secin.")
+                self._rec_detail.setText(
+                    "Su an listedeki coinlerde gecerli LONG/SHORT setup yok. "
+                    "Baska dilim deneyin veya birkac dakika sonra tekrar deneyin."
+                )
         except Exception as e:
             self._rec_detail.setText(f"Hata: {e}")
 
@@ -1626,124 +1818,170 @@ class MainWindow(QMainWindow):
 
     def _build_right_panel(self) -> QVBoxLayout:
         layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll, _rin, scroll_lay = self._make_column_scroll(360)
 
         grp = QGroupBox("Trade Setup")
         grp.setMinimumWidth(320)
-        grp.setMaximumWidth(420)
+        grp.setMaximumWidth(460)
         grp_layout = QVBoxLayout(grp)
+        grp_layout.setSpacing(10)
+        grp_layout.setContentsMargins(12, 16, 12, 12)
 
         self._selected_symbol_label = QLabel("Seçili parite: --")
-        self._selected_symbol_label.setStyleSheet(f"color: {BLUE}; font-size: 10px;")
+        self._selected_symbol_label.setStyleSheet(f"color: {BLUE}; font-size: 12px; font-weight: 600;")
         self._selected_symbol_label.setAlignment(Qt.AlignCenter)
+        self._selected_symbol_label.setWordWrap(True)
+        self._selected_symbol_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         grp_layout.addWidget(self._selected_symbol_label)
 
         self._dir_label = QLabel("--")
-        self._dir_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        self._dir_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
         self._dir_label.setAlignment(Qt.AlignCenter)
         self._dir_label.setWordWrap(True)
+        self._dir_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         grp_layout.addWidget(self._dir_label)
 
-        self._confidence_label = QLabel("Guven: --")
-        self._confidence_label.setFont(QFont("Segoe UI", 11))
-        self._confidence_label.setAlignment(Qt.AlignCenter)
-        self._confidence_label.setWordWrap(True)
-        self._confidence_label.setMinimumHeight(36)
-        grp_layout.addWidget(self._confidence_label)
+        self._confidence_box = QTextEdit()
+        self._confidence_box.setReadOnly(True)
+        self._confidence_box.setFrameShape(QFrame.NoFrame)
+        self._confidence_box.setPlaceholderText("Güven ve özet burada görünür...")
+        self._confidence_box.setFont(QFont("Segoe UI", 11))
+        self._confidence_box.setMinimumHeight(88)
+        self._confidence_box.setMaximumHeight(200)
+        self._confidence_box.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._confidence_box.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._confidence_box.setStyleSheet(
+            f"QTextEdit {{ background-color: {BG_PANEL}; color: {TEXT}; padding: 10px; "
+            f"border: 1px solid #2b2f3a; border-radius: 8px; font-size: 11px; }}"
+        )
+        self._confidence_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        grp_layout.addWidget(self._confidence_box)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
+        line.setFixedHeight(1)
+        line.setStyleSheet("background-color: #2b2f3a; border: none; max-height: 1px;")
         grp_layout.addWidget(line)
 
         self._setup_table = QTableWidget(7, 2)
         self._setup_table.setHorizontalHeaderLabels(["", "Fiyat"])
         self._setup_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self._setup_table.verticalHeader().setVisible(False)
         self._setup_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._setup_table.verticalHeader().setDefaultSectionSize(28)
         self._setup_table.setWordWrap(True)
-        self._setup_table.setStyleSheet("QTableWidget::item { padding: 6px; min-height: 24px; }")
+        self._setup_table.setStyleSheet(
+            f"QTableWidget {{ color: {TEXT}; gridline-color: #2b2f3a; }}"
+            "QTableWidget::item { padding: 8px; min-height: 26px; color: #eaecef; }"
+        )
+        self._apply_table_compact(self._setup_table)
         grp_layout.addWidget(self._setup_table)
 
-        self._sl_rule_label = QLabel("")
-        self._sl_rule_label.setStyleSheet("color: #9e9e9e; font-size: 9px;")
-        self._sl_rule_label.setWordWrap(True)
+        self._sl_rule_label = self._wrap_label("", color="#9e9e9e", font_px=11)
         grp_layout.addWidget(self._sl_rule_label)
 
-        grp_layout.addWidget(QLabel("Nedenler:"))
+        lr = QLabel("Nedenler:")
+        lr.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600;")
+        grp_layout.addWidget(lr)
         self._reason_table = QTableWidget(0, 1)
         self._reason_table.setHorizontalHeaderLabels(["Aciklama"])
         self._reason_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._reason_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._reason_table.verticalHeader().setDefaultSectionSize(26)
+        self._reason_table.verticalHeader().setDefaultSectionSize(28)
         self._reason_table.setWordWrap(True)
-        self._reason_table.setStyleSheet("QTableWidget::item { padding: 5px; min-height: 22px; }")
+        self._reason_table.setStyleSheet(
+            f"QTableWidget {{ color: {TEXT}; }}"
+            "QTableWidget::item { padding: 8px; min-height: 24px; color: #eaecef; }"
+        )
+        self._apply_table_compact(self._reason_table)
         grp_layout.addWidget(self._reason_table)
 
         self._btn_paper_open = QPushButton("Paper'da Ac")
-        self._btn_paper_open.setStyleSheet(f"background-color: {ORANGE}; color: white; font-weight: bold; padding: 6px;")
+        self._btn_paper_open.setMinimumHeight(40)
+        self._btn_paper_open.setStyleSheet(
+            f"background-color: {ORANGE}; color: white; font-weight: bold; "
+            "padding: 10px 16px; min-height: 40px;"
+        )
         self._btn_paper_open.setToolTip("Mevcut sinyali sanal (paper) pozisyon olarak acar. Gercek para kullanilmaz.")
         self._btn_paper_open.clicked.connect(self._on_paper_open)
         grp_layout.addWidget(self._btn_paper_open)
 
-        layout.addWidget(grp)
+        scroll_lay.addWidget(grp)
 
         grp_filter = QGroupBox("Sinyal Filtresi")
-        grp_filter.setStyleSheet(f"font-size: 10px;")
         flay = QVBoxLayout(grp_filter)
+        flay.setSpacing(8)
+        flay.setContentsMargins(12, 14, 12, 12)
         self._filter_high_quality = QCheckBox("Sadece yuksek kalite sinyaller")
+        self._filter_high_quality.setStyleSheet(f"color: {TEXT}; font-size: 11px;")
         self._filter_high_quality.setToolTip("Acikken sadece min guven ve confluence gecen sinyaller gosterilir.")
         self._filter_high_quality.setChecked(False)
         flay.addWidget(self._filter_high_quality)
-        row_f = QHBoxLayout()
-        row_f.addWidget(QLabel("Min guven:"))
+        row_min = QHBoxLayout()
+        lbl_mq = QLabel("Min guven:")
+        lbl_mq.setStyleSheet(f"color: {TEXT}; font-size: 11px; min-width: 72px;")
+        row_min.addWidget(lbl_mq)
         self._spin_min_quality = QSpinBox()
         self._spin_min_quality.setRange(5, 10)
         self._spin_min_quality.setValue(7)
-        self._spin_min_quality.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT};")
-        row_f.addWidget(self._spin_min_quality)
+        self._spin_min_quality.setMinimumWidth(80)
+        self._spin_min_quality.setMinimumHeight(30)
+        self._spin_min_quality.setStyleSheet(f"background-color: {BG_PANEL}; color: {TEXT}; font-size: 11px;")
+        row_min.addWidget(self._spin_min_quality)
+        row_min.addStretch(1)
+        flay.addLayout(row_min)
         self._filter_require_confluence = QCheckBox("Confluence gecmeli")
+        self._filter_require_confluence.setStyleSheet(f"color: {TEXT}; font-size: 11px;")
         self._filter_require_confluence.setChecked(True)
-        row_f.addWidget(self._filter_require_confluence)
-        row_f.addStretch()
-        flay.addLayout(row_f)
-        self._filter_reject_label = QLabel("")
-        self._filter_reject_label.setStyleSheet("color: #ff9800; font-size: 9px;")
-        self._filter_reject_label.setWordWrap(True)
+        flay.addWidget(self._filter_require_confluence)
+        self._filter_reject_label = self._wrap_label("", color="#ff9800", font_px=11)
         flay.addWidget(self._filter_reject_label)
-        layout.addWidget(grp_filter)
+        scroll_lay.addWidget(grp_filter)
 
         grp2 = QGroupBox("Indikator Ozeti")
         grp2.setMinimumWidth(320)
-        grp2.setMaximumWidth(420)
+        grp2.setMaximumWidth(460)
         grp2_layout = QVBoxLayout(grp2)
+        grp2_layout.setContentsMargins(10, 14, 10, 10)
         self._indicator_table = QTableWidget(0, 2)
         self._indicator_table.setHorizontalHeaderLabels(["Indikator", "Deger"])
         self._indicator_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._indicator_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._indicator_table.verticalHeader().setDefaultSectionSize(24)
+        self._indicator_table.verticalHeader().setDefaultSectionSize(26)
         self._indicator_table.setWordWrap(True)
-        self._indicator_table.setStyleSheet("QTableWidget::item { padding: 4px; min-height: 20px; }")
+        self._indicator_table.setStyleSheet(
+            f"QTableWidget {{ color: {TEXT}; gridline-color: #2b2f3a; }}"
+            "QTableWidget::item { padding: 8px 10px; min-height: 26px; font-size: 11px; color: #eaecef; }"
+        )
+        self._apply_table_compact(self._indicator_table)
         grp2_layout.addWidget(self._indicator_table)
-        layout.addWidget(grp2)
+        scroll_lay.addWidget(grp2)
 
         grp3 = QGroupBox("Confluence Matrisi (10 Kriter)")
         grp3.setMinimumWidth(320)
-        grp3.setMaximumWidth(420)
+        grp3.setMaximumWidth(460)
         grp3_layout = QVBoxLayout(grp3)
+        grp3_layout.setContentsMargins(10, 14, 10, 10)
         self._confluence_table = QTableWidget(0, 3)
         self._confluence_table.setHorizontalHeaderLabels(["Kriter", "OK", "Detay"])
         self._confluence_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._confluence_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._confluence_table.verticalHeader().setDefaultSectionSize(22)
-        self._confluence_table.setStyleSheet("QTableWidget::item { padding: 3px; min-height: 18px; }")
+        self._confluence_table.verticalHeader().setDefaultSectionSize(26)
+        self._confluence_table.setWordWrap(True)
+        self._confluence_table.setStyleSheet(
+            f"QTableWidget {{ color: {TEXT}; gridline-color: #2b2f3a; }}"
+            "QTableWidget::item { padding: 8px 10px; min-height: 26px; font-size: 11px; color: #eaecef; }"
+        )
+        self._apply_table_compact(self._confluence_table)
         grp3_layout.addWidget(self._confluence_table)
         self._confluence_score_label = QLabel("Puan: --/10 (min 6)")
-        self._confluence_score_label.setStyleSheet(f"color: {GREEN}; font-size: 10px;")
+        self._confluence_score_label.setStyleSheet(f"color: {GREEN}; font-size: 11px;")
+        self._confluence_score_label.setWordWrap(True)
         grp3_layout.addWidget(self._confluence_score_label)
-        layout.addWidget(grp3)
+        scroll_lay.addWidget(grp3)
 
-        layout.addStretch()
+        scroll_lay.addStretch(1)
+        layout.addWidget(scroll)
         return layout
 
     # ==================================================================
@@ -2047,7 +2285,7 @@ class MainWindow(QMainWindow):
         class AnalysisWorker(QThread):
             done = pyqtSignal(object)
 
-            def __init__(self, sym, intv, lim, min_conf_val, prev_direction, analysis_mode, analyses_in_direction):
+            def __init__(self, sym, intv, lim, min_conf_val, prev_direction, analysis_mode, analyses_in_direction, tp_profile: str):
                 super().__init__()
                 self.sym = sym
                 self.intv = intv
@@ -2056,6 +2294,7 @@ class MainWindow(QMainWindow):
                 self.prev_direction = prev_direction
                 self.analysis_mode = analysis_mode
                 self.analyses_in_direction = analyses_in_direction
+                self.tp_profile = tp_profile
 
             def run(self):
                 try:
@@ -2126,6 +2365,7 @@ class MainWindow(QMainWindow):
                         analyses_in_current_direction=self.analyses_in_direction,
                         fear_greed_index=fear_greed_index, liquidations_24h=liq,
                         exchange_flow_signal=flow,
+                        tp_profile=self.tp_profile,
                     )
                     self.done.emit({
                         "df": df, "result": result, "mtf_consensus": mtf_consensus,
@@ -2135,7 +2375,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.done.emit({"error": str(e)})
 
-        w = AnalysisWorker(symbol, interval, limit, self._spin_min_conf.value(), prev_dir, mode, analyses_in_dir)
+        w = AnalysisWorker(symbol, interval, limit, self._spin_min_conf.value(), prev_dir, mode, analyses_in_dir, self._get_tp_profile())
         w.done.connect(self._on_analysis_done)
         w.start()
         self._analysis_worker = w
@@ -2325,7 +2565,11 @@ class MainWindow(QMainWindow):
         if setup is None:
             self._dir_label.setText("BEKLE")
             self._dir_label.setStyleSheet("color: #ff9800;")
-            self._confidence_label.setText(res.summary)
+            summary = res.summary or ""
+            tp_key = (res.indicators or {}).get("tp_profile") if res.indicators else None
+            if tp_key:
+                summary = f"TP profili: {self._tp_profile_display_label(str(tp_key))}\n\n" + summary
+            self._confidence_box.setPlainText(summary)
             self._sl_rule_label.setText("")
 
             prec = self._price_precision(res.indicators.get("close", 0))
@@ -2345,6 +2589,7 @@ class MainWindow(QMainWindow):
                 vi.setForeground(QColor(clr))
                 self._setup_table.setItem(i, 1, vi)
             self._reason_table.setRowCount(0)
+            self._setup_table.resizeRowsToContents()
             return
 
         color = _DIRECTION_COLORS.get(setup.direction, "#ffffff")
@@ -2359,9 +2604,12 @@ class MainWindow(QMainWindow):
         risk_pct = _risk_pct_from_confidence(setup.confidence)
         risk_usd = acct * (risk_pct / 100)
         pos_usd = _position_usd_from_risk(risk_pct, setup.risk_pct, acct, setup.confidence)
-        self._confidence_label.setText(
-            f"Guven: {setup.confidence}/10  |  Risk: %{risk_pct:.1f} (${risk_usd:.1f})  |  Kaldirac: max {lev}x"
-        )
+        tp_key = (res.indicators or {}).get("tp_profile") if res.indicators else None
+        tp_label = self._tp_profile_display_label(str(tp_key)) if tp_key else self._tp_profile_display_label("normal")
+        conf_lines = [
+            f"TP profili: {tp_label}",
+            f"Guven: {setup.confidence}/10  |  Risk: %{risk_pct:.1f} (${risk_usd:.1f})  |  Kaldirac: max {lev}x",
+        ]
 
         # SL kurali: TP1 vurulunca breakeven, TP2'ye yaklasinca SL TP1'e
         self._sl_rule_label.setText(
@@ -2369,23 +2617,15 @@ class MainWindow(QMainWindow):
         )
 
         if res.indicators.get("spread_warning"):
-            self._confidence_label.setText(
-                self._confidence_label.text() + "  |  " + res.indicators["spread_warning"]
-            )
+            conf_lines.append(str(res.indicators["spread_warning"]))
         if res.indicators.get("spread_bps") and res.indicators["spread_bps"] > 25:
-            self._confidence_label.setText(
-                self._confidence_label.text() + f"  |  Yuksek spread: {res.indicators['spread_bps']:.0f} bps"
-            )
+            conf_lines.append(f"Yuksek spread: {res.indicators['spread_bps']:.0f} bps")
         # Ters sinyal uyarisi: Pozisyonum LONG iken SHORT cikti veya tersi
         my_pos = self._combo_my_position.currentText()
         if my_pos == "LONG" and setup.direction == "SHORT":
-            self._confidence_label.setText(
-                self._confidence_label.text() + "  |  UYARI: Onceki LONG, simdi SHORT - tasiyabilirsiniz"
-            )
+            conf_lines.append("UYARI: Onceki LONG, simdi SHORT - tasiyabilirsiniz")
         elif my_pos == "SHORT" and setup.direction == "LONG":
-            self._confidence_label.setText(
-                self._confidence_label.text() + "  |  UYARI: Onceki SHORT, simdi LONG - tasiyabilirsiniz"
-            )
+            conf_lines.append("UYARI: Onceki SHORT, simdi LONG - tasiyabilirsiniz")
 
         acct = self._get_account_size()
         prec = self._price_precision(setup.entry)
@@ -2399,6 +2639,7 @@ class MainWindow(QMainWindow):
         ez_high = getattr(setup, "entry_zone_high", 0.0) or 0.0
         tp_pri = getattr(setup, "tp_priority", "") or ""
         rows = [
+            ("TP profili", tp_label, BLUE),
             ("Entry (Giriş)", f"{setup.entry:.{prec}f}", "#eaecef"),
             ("Limit (pullback)", f"{limit_entry:.{prec}f}" if limit_entry else "-", "#9e9e9e"),
             ("Giriş Bölgesi", f"{ez_low:.{prec}f} - {ez_high:.{prec}f}" if ez_low and ez_high and ez_low != ez_high else "-", "#9e9e9e"),
@@ -2439,9 +2680,11 @@ class MainWindow(QMainWindow):
             )
         # Sembol performans uyarisi
         if symbol in self._weak_symbols:
-            self._confidence_label.setText(
-                self._confidence_label.text() + "  |  UYARI: Bu parite backtest'te zayif"
-            )
+            conf_lines.append("UYARI: Bu parite backtest'te zayif")
+        self._confidence_box.setPlainText("\n".join(conf_lines))
+
+        self._setup_table.resizeRowsToContents()
+        self._reason_table.resizeRowsToContents()
 
     def _update_indicator_panel(self) -> None:
         res = self._last_result
@@ -2542,8 +2785,14 @@ class MainWindow(QMainWindow):
 
         self._indicator_table.setRowCount(len(rows))
         for i, (name, val) in enumerate(rows):
-            self._indicator_table.setItem(i, 0, QTableWidgetItem(name))
-            self._indicator_table.setItem(i, 1, QTableWidgetItem(val))
+            ni = QTableWidgetItem(name)
+            ni.setForeground(QColor(TEXT))
+            vi = QTableWidgetItem(str(val))
+            vi.setForeground(QColor(TEXT))
+            vi.setToolTip(str(val))
+            self._indicator_table.setItem(i, 0, ni)
+            self._indicator_table.setItem(i, 1, vi)
+        self._indicator_table.resizeRowsToContents()
 
         setup = res.setup
         if setup and ind.get("confluence_criteria"):
@@ -2558,7 +2807,12 @@ class MainWindow(QMainWindow):
                 ok_item = QTableWidgetItem("Evet" if ok else "Hayir")
                 ok_item.setForeground(QColor(GREEN if ok else "#9e9e9e"))
                 self._confluence_table.setItem(i, 1, ok_item)
-                self._confluence_table.setItem(i, 2, QTableWidgetItem(str(detail)[:40]))
+                dtxt = str(detail)
+                det_item = QTableWidgetItem(dtxt if len(dtxt) <= 100 else dtxt[:97] + "...")
+                det_item.setToolTip(dtxt)
+                det_item.setForeground(QColor(TEXT))
+                self._confluence_table.setItem(i, 2, det_item)
+            self._confluence_table.resizeRowsToContents()
         else:
             self._confluence_score_label.setText("Confluence: --")
             self._confluence_table.setRowCount(0)
@@ -2735,6 +2989,8 @@ class MainWindow(QMainWindow):
                 self._pc_account.setValue(int(self._get_account_size()))
                 if self._live_price > 0:
                     self._pc_entry.setValue(self._live_price)
+            elif tab_name == "Backtest":
+                self._update_backtest_tp_mults_label()
         except Exception as e:
             self._status_label.setText(f"Hata: {e}")
 
@@ -2878,18 +3134,19 @@ class MainWindow(QMainWindow):
 
         try:
             scalp_mode = self._combo_mode.currentIndex() == 2
+            tp_prof = self._get_tp_profile()
             result: BacktestResult = run_backtest(
                 df, symbol=symbol, interval=interval,
                 stop_loss_atr_mult=self._spin_sl.value(),
-                take_profit_atr_mult=self._spin_tp.value(),
                 min_signal_strength=self._spin_min_str.value(),
                 commission_pct=self._spin_comm.value(),
                 scalp=scalp_mode,
+                tp_profile=tp_prof,
             )
 
             calmar_str = f"{result.calmar_ratio:.2f}" if result.calmar_ratio != float("inf") else "inf"
             summary_text = (
-                f"Toplam Islem: {result.total_trades}  |  "
+                f"TP profili: {self._tp_profile_display_label(tp_prof)}  |  "
                 f"Kazanc: {result.winning_trades}  Kayip: {result.losing_trades}  |  "
                 f"Basari: %{result.win_rate}  |  "
                 f"Toplam PnL: %{result.total_pnl_pct:.2f}  |  "
@@ -2930,13 +3187,14 @@ class MainWindow(QMainWindow):
             return
         try:
             scalp_mode = self._combo_mode.currentIndex() == 2
-            params, result = optimize_backtest(df, symbol, interval, self._spin_comm.value(), scalp=scalp_mode)
+            params, result = optimize_backtest(
+                df, symbol, interval, self._spin_comm.value(), scalp=scalp_mode, tp_profile=self._get_tp_profile()
+            )
             self._spin_sl.setValue(params["sl"])
-            self._spin_tp.setValue(params["tp"])
             self._spin_min_str.setValue(params["min_str"])
             calmar_str = f"{result.calmar_ratio:.2f}" if result.calmar_ratio != float("inf") else "inf"
             self._bt_summary.setText(
-                f"Optimize: SL={params['sl']} TP={params['tp']} MinStr={params['min_str']} | "
+                f"Optimize: SL={params['sl']} MinStr={params['min_str']} (TP profili sabit) | "
                 f"Win:%{result.win_rate} PF:{result.profit_factor} PnL:%{result.total_pnl_pct:.2f} "
                 f"MaxDD:%{result.max_drawdown_pct:.2f} Calmar:{calmar_str}"
             )
@@ -2964,7 +3222,9 @@ class MainWindow(QMainWindow):
         interval = self._combo_interval.currentText()
         scalp_mode = self._combo_mode.currentIndex() == 2
         try:
-            results = get_symbol_performance(symbols, interval, 300, scalp=scalp_mode)
+            results = get_symbol_performance(
+                symbols, interval, 300, scalp=scalp_mode, tp_profile=self._get_tp_profile()
+            )
         except Exception as exc:
             self._bt_summary.setText(f"Hata: {exc}")
             return
@@ -2983,10 +3243,3 @@ class MainWindow(QMainWindow):
         dlg = DisclaimerDialog(self)
         dlg.exec_()
 
-    # ==================================================================
-    # Cleanup
-    # ==================================================================
-
-    def closeEvent(self, event) -> None:
-        self._ws.disconnect()
-        super().closeEvent(event)

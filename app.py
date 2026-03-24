@@ -39,7 +39,7 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setFont(QFont("Segoe UI", 10))
+    app.setFont(QFont("Segoe UI", 11))
 
     pal = QPalette()
     pal.setColor(QPalette.Window, QColor(BG_MAIN))

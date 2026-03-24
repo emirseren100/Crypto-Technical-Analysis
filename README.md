@@ -60,6 +60,18 @@ python app.py
 
 Uygulama açıldığında grafik ve analiz sekmelerini kullanabilirsiniz. Veriler Binance **public** API ile çekilir; ekstra API anahtarı gerekmez.
 
+### TP profili (sol panel)
+
+**Ayarlar** içinde **TP Profili** menüsü, sinyal mantığını ve stop-loss’u değiştirmeden yalnızca **TP1 / TP2 / TP3** mesafelerini (risk çarpanı) değiştirir:
+
+| Seçenek | Anlamı |
+|--------|--------|
+| **Normal** | Varsayılan hedefler (mevcut davranış). |
+| **Yüksek hedef (daha riskli)** | Daha uzak TP’ler; tam isabet olursa potansiyel kâr artar, hedefe ulaşma ihtimali genelde düşer. |
+| **Muhafazakar (yakın TP)** | Daha yakın TP’ler; hedefe gelme ihtimali genelde artar, hedef başına kâr potansiyeli düşer. |
+
+**Trade Setup** özetinde ve tabloda **TP profili** satırı gösterilir (analiz `indicators` ile uyumlu). **Paper Trading**, **Öneriler** ve **Backtest** (kısmi TP merdiveni) aynı **TP Profili** seçimini kullanır; seçim **QSettings** ile (`BinanceTA` / `TeknikAnaliz`, anahtar `tp_profile`) uygulama kapanınca da hatırlanır. Profili değiştirdikten sonra **Analiz Et**, önerileri **yeniden çekin** veya **Backtest**’i tekrar çalıştırın. Backtest sekmesinde yeşil satır, o anki profile göre **TP1/TP2/TP3 R çarpanlarını** gösterir; **SL (ATR x)** stop mesafesini, **Optimize** ise SL + min sinyal için grid arar (TP profili optimize sırasında sabittir).
+
 ## Lisans
 
 Bu proje **MIT License** ile yayınlanır — detay için kökteki [`LICENSE`](LICENSE) dosyasına bakın.

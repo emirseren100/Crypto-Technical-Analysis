@@ -48,8 +48,9 @@ def global_stylesheet(dark: bool = True) -> str:
     QTabBar::tab {{
         background-color: {c['BG_PANEL']};
         color: {c['TEXT_MUTED']};
-        padding: 10px 20px;
-        margin-right: 2px;
+        padding: 10px 18px;
+        margin-right: 4px;
+        min-height: 22px;
         border-top-left-radius: 6px;
         border-top-right-radius: 6px;
         font-weight: 500;
@@ -84,9 +85,11 @@ def global_stylesheet(dark: bool = True) -> str:
         color: white;
         border: none;
         border-radius: 6px;
-        padding: 10px 20px;
+        padding: 10px 18px;
         font-weight: 600;
         font-size: 11px;
+        min-height: 32px;
+        min-width: 72px;
     }}
     QPushButton:hover {{ background-color: #34a853; }}
     QPushButton:pressed {{ background-color: #0d652d; }}
@@ -98,13 +101,22 @@ def global_stylesheet(dark: bool = True) -> str:
         color: {c['TEXT']};
         border: 1px solid {c['BORDER']};
         border-radius: 6px;
+        min-height: 30px;
+        font-size: 11px;
+        padding: 6px 10px;
     }}
     QTableWidget {{ background-color: {c['BG_PANEL']}; color: {c['TEXT']}; border: 1px solid {c['BORDER']}; }}
     QHeaderView::section {{ background-color: {c['BG_DARK']}; color: {c['TEXT_MUTED']}; }}
-    QCheckBox {{ color: {c['TEXT']}; }}
-    QStatusBar {{ background-color: {c['BG_DARK']}; color: {c['TEXT_MUTED']}; }}
-    QLabel {{ color: {c['TEXT']}; }}
-    QToolTip {{ background-color: {c['BG_DARK']}; color: {c['TEXT']}; border: 1px solid {c['BORDER']}; }}
+    QCheckBox {{ color: {c['TEXT']}; font-size: 11px; }}
+    QStatusBar {{
+        background-color: {c['BG_DARK']};
+        color: {c['TEXT_MUTED']};
+        font-size: 11px;
+        padding: 4px 8px;
+        min-height: 24px;
+    }}
+    QLabel {{ color: {c['TEXT']}; font-size: 11px; }}
+    QToolTip {{ background-color: {c['BG_DARK']}; color: {c['TEXT']}; border: 1px solid {c['BORDER']}; font-size: 11px; }}
     """
     return f"""
     QMainWindow, QWidget {{
@@ -121,8 +133,9 @@ def global_stylesheet(dark: bool = True) -> str:
     QTabBar::tab {{
         background-color: {BG_PANEL};
         color: {TEXT_MUTED};
-        padding: 10px 20px;
-        margin-right: 2px;
+        padding: 10px 18px;
+        margin-right: 4px;
+        min-height: 22px;
         border-top-left-radius: 6px;
         border-top-right-radius: 6px;
         font-weight: 500;
@@ -157,9 +170,11 @@ def global_stylesheet(dark: bool = True) -> str:
         color: #0b0e11;
         border: none;
         border-radius: 6px;
-        padding: 10px 20px;
+        padding: 10px 18px;
         font-weight: 600;
         font-size: 11px;
+        min-height: 32px;
+        min-width: 72px;
     }}
     QPushButton:hover {{
         background-color: #1ed191;
@@ -184,9 +199,9 @@ def global_stylesheet(dark: bool = True) -> str:
         border: 1px solid {BORDER};
         border-radius: 6px;
         padding: 8px 12px;
-        min-height: 28px;
+        min-height: 30px;
         min-width: 120px;
-        font-size: 10px;
+        font-size: 11px;
     }}
     QComboBox:hover {{
         border-color: {TEXT_MUTED};
@@ -207,7 +222,7 @@ def global_stylesheet(dark: bool = True) -> str:
         color: {TEXT};
         border: none;
         padding: 4px 8px;
-        font-size: 10px;
+        font-size: 11px;
     }}
     QLineEdit {{
         background-color: {BG_PANEL};
@@ -215,9 +230,9 @@ def global_stylesheet(dark: bool = True) -> str:
         border: 1px solid {BORDER};
         border-radius: 6px;
         padding: 8px 12px;
-        min-height: 28px;
+        min-height: 30px;
         min-width: 80px;
-        font-size: 10px;
+        font-size: 11px;
     }}
     QLineEdit:focus {{
         border-color: {GREEN};
@@ -228,7 +243,7 @@ def global_stylesheet(dark: bool = True) -> str:
         border: 1px solid {BORDER};
         border-radius: 6px;
         padding: 6px 10px;
-        min-height: 28px;
+        min-height: 30px;
         font-size: 11px;
     }}
     QTableWidget {{
@@ -250,7 +265,7 @@ def global_stylesheet(dark: bool = True) -> str:
         background-color: {BG_DARK};
         color: {TEXT_MUTED};
         padding: 10px 12px;
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 600;
         border: none;
         border-bottom: 2px solid {BORDER};
@@ -273,11 +288,13 @@ def global_stylesheet(dark: bool = True) -> str:
     QStatusBar {{
         background-color: {BG_DARK};
         color: {TEXT_MUTED};
-        font-size: 10px;
+        font-size: 11px;
+        padding: 4px 8px;
+        min-height: 24px;
     }}
     QLabel {{
         color: {TEXT};
-        font-size: 10px;
+        font-size: 11px;
     }}
     QScrollBar:vertical {{
         background-color: {BG_PANEL};

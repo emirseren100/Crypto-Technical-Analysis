@@ -5,6 +5,7 @@ import pandas as pd
 
 from indicators import compute_all
 from signal_engine import score_at_index
+from tp_profiles import get_tp_multipliers
 
 
 @dataclass
@@ -21,6 +22,8 @@ class Trade:
     tp1_hit: bool = False
     tp2_hit: bool = False
     tp3_hit: bool = False
+    realized_pnl_pct: float = 0.0
+    active_sl: float = 0.0
 
 
 @dataclass
@@ -47,11 +50,11 @@ def run_backtest(
     symbol: str = "",
     interval: str = "",
     stop_loss_atr_mult: float = 1.5,
-    take_profit_atr_mult: float = 2.5,
     min_signal_strength: int = 4,
     commission_pct: float = 0.1,
     slippage_pct: float = 0.05,
     scalp: bool = False,
+    tp_profile: str = "normal",
 ) -> BacktestResult:
     if len(df) < 60:
         return BacktestResult(symbol=symbol, interval=interval, total_candles=len(df))
@@ -72,6 +75,9 @@ def run_backtest(
     in_trade = False
     current_trade: Trade | None = None
 
+    tp1_m, tp2_m, tp3_m = get_tp_multipliers(tp_profile, scalp)
+    portion = 1.0 / 3.0
+
     for i in range(50, len(data) - 1):
         close_i = float(data["close"].iloc[i])
         atr_i = float(data["atr"].iloc[i]) if pd.notna(data["atr"].iloc[i]) else 0
@@ -80,22 +86,26 @@ def run_backtest(
             risk = stop_loss_atr_mult * atr_i
             low_i = float(data["low"].iloc[i])
             high_i = float(data["high"].iloc[i])
+            ep = current_trade.entry_price
 
             if current_trade.direction == "LONG":
-                tp1_mult = 0.9 if scalp else 1.0
-                sl = current_trade.entry_price - risk
-                tp1 = current_trade.entry_price + risk * tp1_mult
-                tp2 = current_trade.entry_price + risk * 2.0
-                tp3 = current_trade.entry_price + risk * 3.0
+                tp1 = ep + risk * tp1_m
+                tp2 = ep + risk * tp2_m
+                tp3 = ep + risk * tp3_m
+                sl = current_trade.active_sl
 
                 if low_i <= sl:
                     exit_price = sl * (1 - slippage_pct / 100)
-                    pnl = (exit_price - current_trade.entry_price) / current_trade.entry_price * 100 - commission_pct * 2
+                    remaining = portion * (3 - current_trade.tp1_hit - current_trade.tp2_hit - current_trade.tp3_hit)
+                    pnl = current_trade.realized_pnl_pct + remaining * (exit_price - ep) / ep * 100 - commission_pct * 2
                     current_trade.exit_idx = i
                     current_trade.exit_price = exit_price
                     current_trade.exit_time = str(data.index[i])
                     current_trade.pnl_pct = round(pnl, 4)
-                    current_trade.exit_reason = "Stop-Loss"
+                    reason = "SL"
+                    if current_trade.tp1_hit:
+                        reason = "SL(BE)" if not current_trade.tp2_hit else "SL(TP1)"
+                    current_trade.exit_reason = reason
                     trades.append(current_trade)
                     in_trade = False
                     current_trade = None
@@ -103,21 +113,20 @@ def run_backtest(
 
                 if high_i >= tp1 and not current_trade.tp1_hit:
                     current_trade.tp1_hit = True
+                    tp1_adj = tp1 * (1 - slippage_pct / 100)
+                    current_trade.realized_pnl_pct += portion * (tp1_adj - ep) / ep * 100
+                    current_trade.active_sl = ep
+
                 if high_i >= tp2 and not current_trade.tp2_hit:
                     current_trade.tp2_hit = True
+                    tp2_adj = tp2 * (1 - slippage_pct / 100)
+                    current_trade.realized_pnl_pct += portion * (tp2_adj - ep) / ep * 100
+                    current_trade.active_sl = tp1
+
                 if high_i >= tp3 and not current_trade.tp3_hit:
                     current_trade.tp3_hit = True
-
-                if current_trade.tp1_hit and current_trade.tp2_hit and current_trade.tp3_hit:
-                    tp1_adj = tp1 * (1 - slippage_pct / 100)
-                    tp2_adj = tp2 * (1 - slippage_pct / 100)
                     tp3_adj = tp3 * (1 - slippage_pct / 100)
-                    pnl = (
-                        (tp1_adj - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-                        + (tp2_adj - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-                        + (tp3_adj - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-                        - commission_pct * 2
-                    )
+                    pnl = current_trade.realized_pnl_pct + portion * (tp3_adj - ep) / ep * 100 - commission_pct * 2
                     current_trade.exit_idx = i
                     current_trade.exit_price = tp3_adj
                     current_trade.exit_time = str(data.index[i])
@@ -129,20 +138,23 @@ def run_backtest(
                     continue
 
             elif current_trade.direction == "SHORT":
-                tp1_mult = 0.9 if scalp else 1.0
-                sl = current_trade.entry_price + risk
-                tp1 = current_trade.entry_price - risk * tp1_mult
-                tp2 = current_trade.entry_price - risk * 2.0
-                tp3 = current_trade.entry_price - risk * 3.0
+                tp1 = ep - risk * tp1_m
+                tp2 = ep - risk * tp2_m
+                tp3 = ep - risk * tp3_m
+                sl = current_trade.active_sl
 
                 if high_i >= sl:
                     exit_price = sl * (1 + slippage_pct / 100)
-                    pnl = (current_trade.entry_price - exit_price) / current_trade.entry_price * 100 - commission_pct * 2
+                    remaining = portion * (3 - current_trade.tp1_hit - current_trade.tp2_hit - current_trade.tp3_hit)
+                    pnl = current_trade.realized_pnl_pct + remaining * (ep - exit_price) / ep * 100 - commission_pct * 2
                     current_trade.exit_idx = i
                     current_trade.exit_price = exit_price
                     current_trade.exit_time = str(data.index[i])
                     current_trade.pnl_pct = round(pnl, 4)
-                    current_trade.exit_reason = "Stop-Loss"
+                    reason = "SL"
+                    if current_trade.tp1_hit:
+                        reason = "SL(BE)" if not current_trade.tp2_hit else "SL(TP1)"
+                    current_trade.exit_reason = reason
                     trades.append(current_trade)
                     in_trade = False
                     current_trade = None
@@ -150,21 +162,20 @@ def run_backtest(
 
                 if low_i <= tp1 and not current_trade.tp1_hit:
                     current_trade.tp1_hit = True
+                    tp1_adj = tp1 * (1 + slippage_pct / 100)
+                    current_trade.realized_pnl_pct += portion * (ep - tp1_adj) / ep * 100
+                    current_trade.active_sl = ep
+
                 if low_i <= tp2 and not current_trade.tp2_hit:
                     current_trade.tp2_hit = True
+                    tp2_adj = tp2 * (1 + slippage_pct / 100)
+                    current_trade.realized_pnl_pct += portion * (ep - tp2_adj) / ep * 100
+                    current_trade.active_sl = tp1
+
                 if low_i <= tp3 and not current_trade.tp3_hit:
                     current_trade.tp3_hit = True
-
-                if current_trade.tp1_hit and current_trade.tp2_hit and current_trade.tp3_hit:
-                    tp1_adj = tp1 * (1 + slippage_pct / 100)
-                    tp2_adj = tp2 * (1 + slippage_pct / 100)
                     tp3_adj = tp3 * (1 + slippage_pct / 100)
-                    pnl = (
-                        (current_trade.entry_price - tp1_adj) / current_trade.entry_price * 100 / 3
-                        + (current_trade.entry_price - tp2_adj) / current_trade.entry_price * 100 / 3
-                        + (current_trade.entry_price - tp3_adj) / current_trade.entry_price * 100 / 3
-                        - commission_pct * 2
-                    )
+                    pnl = current_trade.realized_pnl_pct + portion * (ep - tp3_adj) / ep * 100 - commission_pct * 2
                     current_trade.exit_idx = i
                     current_trade.exit_price = tp3_adj
                     current_trade.exit_time = str(data.index[i])
@@ -185,64 +196,48 @@ def run_backtest(
         if buy_score >= min_signal_strength and buy_score > sell_score:
             raw_entry = float(data["open"].iloc[i + 1])
             entry_price = raw_entry * (1 + slippage_pct / 100)
+            initial_sl = entry_price - stop_loss_atr_mult * atr_i
             current_trade = Trade(
                 entry_idx=i + 1,
                 entry_price=entry_price,
                 entry_time=str(data.index[i + 1]),
                 direction="LONG",
+                active_sl=initial_sl,
             )
             in_trade = True
 
         elif sell_score >= min_signal_strength and sell_score > buy_score:
             raw_entry = float(data["open"].iloc[i + 1])
             entry_price = raw_entry * (1 - slippage_pct / 100)
+            initial_sl = entry_price + stop_loss_atr_mult * atr_i
             current_trade = Trade(
                 entry_idx=i + 1,
                 entry_price=entry_price,
                 entry_time=str(data.index[i + 1]),
                 direction="SHORT",
+                active_sl=initial_sl,
             )
             in_trade = True
 
     if in_trade and current_trade:
         last_close = float(data["close"].iloc[-1])
+        ep = current_trade.entry_price
         risk = float(data["atr"].iloc[-1]) * stop_loss_atr_mult if pd.notna(data["atr"].iloc[-1]) else 0
         if risk <= 0:
-            risk = abs(last_close - current_trade.entry_price) * 0.5
-        tp1_mult = 0.9 if scalp else 1.0
-        pnl = 0.0
+            risk = abs(last_close - ep) * 0.5
+        remaining = portion * (3 - current_trade.tp1_hit - current_trade.tp2_hit - current_trade.tp3_hit)
         if current_trade.direction == "LONG":
-            tp1 = current_trade.entry_price + risk * tp1_mult
-            tp2 = current_trade.entry_price + risk * 2
-            tp3 = current_trade.entry_price + risk * 3
-            if current_trade.tp1_hit:
-                pnl += (tp1 - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-            if current_trade.tp2_hit:
-                pnl += (tp2 - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-            if current_trade.tp3_hit:
-                pnl += (tp3 - current_trade.entry_price) / current_trade.entry_price * 100 / 3
-            remaining = (3 - current_trade.tp1_hit - current_trade.tp2_hit - current_trade.tp3_hit) / 3
             exit_adj = last_close * (1 - slippage_pct / 100)
-            pnl += remaining * (exit_adj - current_trade.entry_price) / current_trade.entry_price * 100
+            pnl = current_trade.realized_pnl_pct + remaining * (exit_adj - ep) / ep * 100
         else:
-            tp1 = current_trade.entry_price - risk * tp1_mult
-            tp2 = current_trade.entry_price - risk * 2
-            tp3 = current_trade.entry_price - risk * 3
-            if current_trade.tp1_hit:
-                pnl += (current_trade.entry_price - tp1) / current_trade.entry_price * 100 / 3
-            if current_trade.tp2_hit:
-                pnl += (current_trade.entry_price - tp2) / current_trade.entry_price * 100 / 3
-            if current_trade.tp3_hit:
-                pnl += (current_trade.entry_price - tp3) / current_trade.entry_price * 100 / 3
-            remaining = (3 - current_trade.tp1_hit - current_trade.tp2_hit - current_trade.tp3_hit) / 3
             exit_adj = last_close * (1 + slippage_pct / 100)
-            pnl += remaining * (current_trade.entry_price - exit_adj) / current_trade.entry_price * 100
+            pnl = current_trade.realized_pnl_pct + remaining * (ep - exit_adj) / ep * 100
         pnl -= commission_pct * 2
         current_trade.exit_idx = len(data) - 1
         current_trade.exit_price = last_close
         current_trade.exit_time = str(data.index[-1])
         current_trade.pnl_pct = round(pnl, 4)
-        current_trade.exit_reason = "Acik (TP1/2/3 kismi)"
+        current_trade.exit_reason = "Acik (kismi)"
         trades.append(current_trade)
 
     return _build_result(trades, symbol, interval, len(data), slippage_pct)
@@ -302,44 +297,40 @@ def optimize_backtest(
     interval: str = "",
     commission_pct: float = 0.1,
     scalp: bool = False,
+    tp_profile: str = "normal",
 ) -> tuple[dict, BacktestResult]:
-    """Grid search: en iyi SL, TP, min_signal kombinasyonu."""
+    """Grid search: en iyi SL ve min_signal (TP mesafeleri secili tp_profile ile sabit)."""
     if scalp:
         sl_opts = [0.8, 1.0, 1.2]
-        tp_opts = [1.5, 2.0, 2.5]
         min_str_opts = [5, 6, 7]
     else:
         sl_opts = [1.0, 1.25, 1.5, 1.75, 2.0]
-        tp_opts = [2.0, 2.5, 3.0, 3.5]
         min_str_opts = [4, 5, 6]
     best_score = -999
     best_params: dict = {}
     best_result: BacktestResult | None = None
 
     for sl in sl_opts:
-        for tp in tp_opts:
-            for ms in min_str_opts:
-                if tp <= sl * 1.5:
-                    continue
-                r = run_backtest(
-                    df, symbol=symbol, interval=interval,
-                    stop_loss_atr_mult=sl,
-                    take_profit_atr_mult=tp,
-                    min_signal_strength=ms,
-                    commission_pct=commission_pct,
-                    scalp=scalp,
-                )
-                if r.total_trades < 5:
-                    continue
-                score = r.profit_factor * 10 + r.win_rate * 0.5 + r.total_pnl_pct * 0.1
-                if score > best_score:
-                    best_score = score
-                    best_params = {"sl": sl, "tp": tp, "min_str": ms}
-                    best_result = r
+        for ms in min_str_opts:
+            r = run_backtest(
+                df, symbol=symbol, interval=interval,
+                stop_loss_atr_mult=sl,
+                min_signal_strength=ms,
+                commission_pct=commission_pct,
+                scalp=scalp,
+                tp_profile=tp_profile,
+            )
+            if r.total_trades < 5:
+                continue
+            score = r.profit_factor * 10 + r.win_rate * 0.5 + r.total_pnl_pct * 0.1
+            if score > best_score:
+                best_score = score
+                best_params = {"sl": sl, "min_str": ms}
+                best_result = r
 
     if best_result is None:
-        best_params = {"sl": 1.0 if scalp else 1.5, "tp": 2.0 if scalp else 2.5, "min_str": 5 if scalp else 4}
-        best_result = run_backtest(df, symbol=symbol, interval=interval, scalp=scalp)
+        best_params = {"sl": 1.0 if scalp else 1.5, "min_str": 5 if scalp else 4}
+        best_result = run_backtest(df, symbol=symbol, interval=interval, scalp=scalp, tp_profile=tp_profile)
     return best_params, best_result
 
 
@@ -348,6 +339,7 @@ def get_symbol_performance(
     interval: str = "1h",
     limit: int = 300,
     scalp: bool = False,
+    tp_profile: str = "normal",
 ) -> list[tuple[str, BacktestResult]]:
     """Sembol bazli backtest performansi. En iyiden en kotuye."""
     from data_fetcher import safe_fetch_klines
@@ -358,7 +350,7 @@ def get_symbol_performance(
             df = safe_fetch_klines(sym, interval, limit)
             if len(df) < 60:
                 continue
-            r = run_backtest(df, symbol=sym, interval=interval, scalp=scalp)
+            r = run_backtest(df, symbol=sym, interval=interval, scalp=scalp, tp_profile=tp_profile)
             results.append((sym, r))
         except Exception:
             continue
